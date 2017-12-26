@@ -15,7 +15,7 @@ from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT as DTFT
 _logger = logging.getLogger(__name__)
 
 try:
-    from pytrustnfe.nfse.dsf import xml_recepcionar_lote_rps
+    from pytrustnfe.nfse.dsf import xml_teste_enviar
     from pytrustnfe.nfse.dsf import cancelar
     from pytrustnfe.nfse.dsf import enviar
     from pytrustnfe.nfse.dsf import teste_enviar
@@ -283,9 +283,9 @@ class InvoiceEletronic(models.Model):
             cert_pfx, self.company_id.nfe_a1_password)
 
         nfse_values = self._prepare_eletronic_invoice_values()
-        xml_enviar = xml_recepcionar_lote_rps(certificado, nfse=nfse_values)
+        xml_enviar = xml_teste_enviar(certificado, nfse=nfse_values)
 
-        self.xml_to_send = base64.encodestring(xml_enviar.encode('utf-8'))
+        self.xml_to_send = base64.encodestring(xml_enviar)
         self.xml_to_send_name = 'nfse-enviar-%s.xml' % self.numero
 
     @api.multi
