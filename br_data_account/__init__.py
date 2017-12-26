@@ -18,3 +18,7 @@ def post_init(cr, registry):
     filename = 'data/br_account.fiscal.document.csv'
     convert_file(cr, 'br_data_account', filename, None, mode='init',
                  noupdate=True, kind='init', report=None)
+
+    filename = 'data/res.state.city.csv'
+    convert_file(cr, 'br_data_account', filename, None, mode='init',
+                 noupdate=True, kind='init', report=None)

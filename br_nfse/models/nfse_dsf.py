@@ -15,6 +15,7 @@ from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT as DTFT
 _logger = logging.getLogger(__name__)
 
 try:
+    from pytrustnfe.nfse.dsf import xml_recepcionar_lote_rps
     from pytrustnfe.nfse.dsf import cancelar
     from pytrustnfe.nfse.dsf import enviar
     from pytrustnfe.nfse.dsf import teste_enviar
@@ -85,6 +86,7 @@ class InvoiceEletronic(models.Model):
     @api.multi
     def _prepare_eletronic_invoice_values(self):
         res = super(InvoiceEletronic, self)._prepare_eletronic_invoice_values()
+
         if self.model == '011':
             tz = pytz.timezone(self.env.user.partner_id.tz) or pytz.utc
             dt_emissao = datetime.strptime(self.data_emissao, DTFT)
@@ -102,8 +104,8 @@ class InvoiceEletronic(models.Model):
                 partner_phone = partner_phone[2:]
 
             im_tomador = ''
-            dsf_cities = ['Campinas', 'Campo Grande', 'São Luís', 'Sorocaba',
-                          'Belém', 'Uberlândia', 'Teresina']
+            dsf_cities = {'Campinas', 'Campo Grande', 'São Luís',
+                          'Sorocaba', 'Belém', 'Uberlândia', 'Teresina'}
             if city_tomador.name in dsf_cities:
                 im_tomador = re.sub(
                     '[^0-9]', '', partner.inscr_mun or '').zfill(9)
@@ -111,12 +113,12 @@ class InvoiceEletronic(models.Model):
             tomador = {
                 'cpf_cnpj': re.sub('[^0-9]', '',
                                    partner.cnpj_cpf or ''),
-                'razao_social': partner.legal_name or '',
+                'razao_social': partner.legal_name or partner.name or '',
                 'logradouro': partner.street or '',
                 'numero': partner.number or '',
                 'complemento': partner.street2 or '',
                 'bairro': partner.district or 'Sem Bairro',
-                'cidade': '6291',
+                'cidade': partner.city_id.siafi_code,
                 'cidade_descricao': partner.name or '',
                 'uf': partner.state_id.code,
                 'cep': re.sub('[^0-9]', '', partner.zip),
@@ -141,7 +143,7 @@ class InvoiceEletronic(models.Model):
                 'razao_social': self.company_id.partner_id.legal_name or '',
                 'inscricao_municipal': re.sub(
                     '[^0-9]', '', self.company_id.partner_id.inscr_mun or ''),
-                'cidade': '6291',
+                'cidade': self.company_id.city_id.siafi_code,
                 'tipo_logradouro': 'Rua',
                 'cnae': self.company_id.cnae_main_id.code,
                 'ddd': company_ddd,
@@ -196,6 +198,7 @@ class InvoiceEletronic(models.Model):
                  int(tomador['cpf_cnpj']))
 
             assinatura = hashlib.sha1(assinatura.encode()).hexdigest()
+
             rps = [{
                 'assinatura': assinatura,
                 'tomador': tomador,
@@ -208,7 +211,7 @@ class InvoiceEletronic(models.Model):
                 'codigo_atividade': '{:0<9}'.format(codigo_atividade),
                 'aliquota_atividade': str("%.4f" % aliquota_issqn),
                 'tipo_recolhimento': tipo_recolhimento,
-                'municipio_prestacao': '6291',
+                'municipio_prestacao': prestador['cidade'],
                 'municipio_descricao_prestacao': city_prestador.name or '',
                 'operacao': self.operation,
                 'tributacao': self.taxation,
@@ -228,7 +231,7 @@ class InvoiceEletronic(models.Model):
             }]
 
             nfse_vals = {
-                'cidade': '6291',
+                'cidade': prestador['cidade'],
                 'cpf_cnpj': prestador['cnpj'],
                 'remetente': prestador['razao_social'],
                 'transacao': 'true',
@@ -265,6 +268,25 @@ class InvoiceEletronic(models.Model):
             ))
             atts.append(danfe_id.id)
         return atts
+
+    @api.multi
+    def action_post_validate(self):
+        super(InvoiceEletronic, self).action_post_validate()
+        if self.model not in ('011'):
+            return
+
+        cert = self.company_id.with_context(
+            {'bin_size': False}).nfe_a1_file
+        cert_pfx = base64.decodestring(cert)
+
+        certificado = Certificado(
+            cert_pfx, self.company_id.nfe_a1_password)
+
+        nfse_values = self._prepare_eletronic_invoice_values()
+        xml_enviar = xml_recepcionar_lote_rps(certificado, nfse=nfse_values)
+
+        self.xml_to_send = base64.encodestring(xml_enviar.encode('utf-8'))
+        self.xml_to_send_name = 'nfse-enviar-%s.xml' % self.numero
 
     @api.multi
     def action_send_eletronic_invoice(self):
@@ -309,8 +331,8 @@ class InvoiceEletronic(models.Model):
                     self.numero_nfse = consulta_situacao.ListaNFSe \
                         .ConsultaNFSe.NumeroNFe
             else:
-                self.codigo_retorno = retorno.Erro.Codigo
-                self.mensagem_retorno = retorno.Erro.Descricao
+                self.codigo_retorno = retorno.Erros.Erro.Codigo
+                self.mensagem_retorno = retorno.Erros.Erro.Descricao
                 return
 
             self.env['invoice.eletronic.event'].create({
